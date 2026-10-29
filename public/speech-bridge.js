@@ -39,51 +39,34 @@
     window.addEventListener(ev, unlock, { capture: true, passive: true });
   });
 
-  var seq = 0, ctrl = null, curUrl = null, speaking = false, curUtt = null;
-  var cache = new Map(); // besedilo -> blob URL (ponovljeni stavki takoj)
+  var seq = 0, speaking = false;
 
   function fire(u, name) { try { if (u && typeof u['on' + name] === 'function') u['on' + name]({ type: name, utterance: u }); } catch (e) {} }
-  function stopAudio() { try { audio.pause(); } catch (e) {} speaking = false; }
+  function stopAudio() {
+    speaking = false;
+    try { audio.pause(); audio.removeAttribute('src'); audio.load(); } catch (e) {}
+  }
 
+  // Pretakanje: <audio> dobi URL in začne igrati, ko pride prvi del zvoka.
+  // Brskalnik ponovljene stavke vzame iz predpomnilnika (takoj).
   function speakRemote(u, id) {
     var text = String((u && u.text) || '').trim();
     if (!text) return;
     var rate = u && typeof u.rate === 'number' ? u.rate : 1;
-    var key = rate + '|' + text;
-    var got = cache.has(key)
-      ? Promise.resolve(cache.get(key))
-      : (ctrl = new AbortController(), fetch('/api/tts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: text, rate: rate }),
-          signal: ctrl.signal,
-        }).then(function (r) {
-          if (!r.ok) throw new Error('tts ' + r.status);
-          return r.blob();
-        }).then(function (b) {
-          var url = URL.createObjectURL(b);
-          if (cache.size > 40) { var k = cache.keys().next().value; URL.revokeObjectURL(cache.get(k)); cache.delete(k); }
-          cache.set(key, url);
-          return url;
-        }));
-
-    got.then(function (url) {
-      if (id !== seq) return;
-      curUtt = u; curUrl = url; speaking = true;
-      audio.onended = function () { if (id === seq) { speaking = false; fire(u, 'end'); } };
-      audio.onerror = function () { if (id === seq) { speaking = false; fire(u, 'error'); } };
-      audio.src = url;
-      var p = audio.play();
-      fire(u, 'start');
-      if (p && p.catch) p.catch(function () {
-        // predvajanje blokirano -> vgrajeni glas kot rezerva
-        speaking = false;
-        if (id === seq && native.synth) try { native.synth.speak(u); } catch (e) {}
-      });
-    }).catch(function (err) {
-      if (err && err.name === 'AbortError') return;
-      if (id === seq && native.synth) try { native.synth.speak(u); } catch (e) {}
-    });
+    var url = '/api/tts?r=' + rate.toFixed(2) + '&t=' + encodeURIComponent(text);
+    var fellBack = false;
+    function fallback() {
+      if (fellBack || id !== seq) return;
+      fellBack = true; speaking = false;
+      if (native.synth) try { native.synth.speak(u); } catch (e) {}
+    }
+    speaking = true;
+    audio.onplaying = function () { if (id === seq) fire(u, 'start'); };
+    audio.onended = function () { if (id === seq) { speaking = false; fire(u, 'end'); } };
+    audio.onerror = function () { if (id === seq) fallback(); };
+    audio.src = url;
+    var p = audio.play();
+    if (p && p.catch) p.catch(function (err) { if (!err || err.name !== 'AbortError') fallback(); });
   }
 
   var synthShim = {
@@ -101,7 +84,6 @@
     },
     cancel: function () {
       seq++;
-      if (ctrl) { try { ctrl.abort(); } catch (e) {} ctrl = null; }
       stopAudio();
       if (native.synth) try { native.synth.cancel(); } catch (e) {}
     },

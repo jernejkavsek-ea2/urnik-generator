@@ -10,7 +10,9 @@ function esc(s: string) {
 async function elevenTts(text: string, rate: number): Promise<Response> {
   const key = process.env.ELEVENLABS_API_KEY!;
   const model = process.env.ELEVENLABS_MODEL || "eleven_v3";
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceName())}?output_format=mp3_44100_128`;
+  const base = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceName())}`;
+  // /stream: zvok začne prihajati takoj, brskalnik ga predvaja sproti
+  const url = `${base}/stream?output_format=mp3_44100_64`;
   const call = (extra: boolean) =>
     fetch(url, {
       method: "POST",
@@ -85,20 +87,28 @@ async function azureTts(text: string, rate: number): Promise<Response> {
   return new Response(r.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" } });
 }
 
-export async function POST(req: Request) {
+function speak(rawText: unknown, rawRate: unknown): Promise<Response> | Response {
   const p = provider();
   if (!p) return Response.json({ error: "Govor ni nastavljen" }, { status: 503 });
+  const text = String(rawText ?? "").replace(/[»«]/g, "").trim().slice(0, 1500);
+  if (!text) return Response.json({ error: "Prazno besedilo" }, { status: 400 });
+  const rate = Math.min(1.5, Math.max(0.6, Number(rawRate) || 1));
+  if (p === "elevenlabs") return elevenTts(text, rate);
+  return p === "google" ? googleTts(text, rate) : azureTts(text, rate);
+}
 
+// GET /api/tts?t=besedilo&r=1 – brskalnik ga predvaja neposredno v <audio> (pretakanje + predpomnilnik)
+export function GET(req: Request) {
+  const q = new URL(req.url).searchParams;
+  return speak(q.get("t"), q.get("r"));
+}
+
+export async function POST(req: Request) {
   let body: { text?: string; rate?: number };
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "Neveljavna zahteva" }, { status: 400 });
   }
-  const text = String(body.text ?? "").replace(/[»«]/g, "").trim().slice(0, 1500);
-  if (!text) return Response.json({ error: "Prazno besedilo" }, { status: 400 });
-  const rate = Math.min(1.5, Math.max(0.6, Number(body.rate) || 1));
-
-  if (p === "elevenlabs") return elevenTts(text, rate);
-  return p === "google" ? googleTts(text, rate) : azureTts(text, rate);
+  return speak(body.text, body.rate);
 }
