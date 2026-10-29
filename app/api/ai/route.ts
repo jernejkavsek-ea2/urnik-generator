@@ -34,9 +34,10 @@ Vrni samo JSON: {"command": string|null, "answer": string|null, "chips": string[
 type Out = { command: string | null; answer: string | null; chips: string[] };
 
 async function gemini(model: string, key: string, user: string) {
-  return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+  return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    // ključ v glavi deluje za stare (AIza…) in nove (AQ.…) ključe
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
     signal: AbortSignal.timeout(20000),
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM }] },
