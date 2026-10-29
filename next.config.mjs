@@ -1,9 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Aplikacija (urnik) je v public/urnik.html; prikažemo jo na korenskem naslovu.
-  async rewrites() {
-    return { beforeFiles: [{ source: "/", destination: "/urnik.html" }] };
-  },
+  // Domača stran je v app/route.ts (bere urnik.html z GitHuba, rezerva je public/urnik.html).
   async headers() {
     return [
       {
