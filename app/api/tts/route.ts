@@ -1,40 +1,46 @@
-// Slovenski nevronski govor prek Azure Speech (sl-SI-PetraNeural / sl-SI-RokNeural)
+// Naraven slovenski govor: Google Chirp 3 HD (če je GOOGLE_API_KEY) ali Azure Neural
+import { provider, voiceName } from "@/lib/speech-provider";
+
 export const runtime = "nodejs";
 
 function esc(s: string) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
-export async function POST(req: Request) {
-  const key = process.env.AZURE_SPEECH_KEY;
-  const region = process.env.AZURE_SPEECH_REGION;
-  if (!key || !region) {
-    return Response.json({ error: "Azure Speech ni nastavljen" }, { status: 503 });
+async function googleTts(text: string, rate: number): Promise<Response> {
+  const key = process.env.GOOGLE_API_KEY!;
+  const voice = voiceName();
+  const languageCode = voice.split("-").slice(0, 2).join("-") || "sl-SI";
+  const call = (withRate: boolean) =>
+    fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(key)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: { text },
+        voice: { languageCode, name: voice },
+        audioConfig: { audioEncoding: "MP3", ...(withRate ? { speakingRate: rate } : {}) },
+      }),
+    });
+  let r = await call(true);
+  if (r.status === 400) r = await call(false); // nekateri glasovi ne sprejmejo hitrosti
+  if (!r.ok) {
+    console.error("Google TTS napaka", r.status, await r.text().catch(() => ""));
+    return Response.json({ error: "Govora ni bilo mogoče ustvariti" }, { status: 502 });
   }
+  const j = (await r.json()) as { audioContent?: string };
+  if (!j.audioContent) return Response.json({ error: "Prazen odgovor" }, { status: 502 });
+  return new Response(Buffer.from(j.audioContent, "base64"), {
+    headers: { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" },
+  });
+}
 
-  let body: { text?: string; rate?: number };
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Neveljavna zahteva" }, { status: 400 });
-  }
-
-  const text = String(body.text ?? "").replace(/[»«]/g, "").trim().slice(0, 1500);
-  if (!text) return Response.json({ error: "Prazno besedilo" }, { status: 400 });
-
-  const voice = process.env.AZURE_TTS_VOICE || "sl-SI-PetraNeural";
-  const rate = Math.min(1.5, Math.max(0.6, Number(body.rate) || 1));
+async function azureTts(text: string, rate: number): Promise<Response> {
+  const key = process.env.AZURE_SPEECH_KEY!;
+  const region = process.env.AZURE_SPEECH_REGION!;
   const ratePct = `${rate >= 1 ? "+" : ""}${Math.round((rate - 1) * 100)}%`;
-
   const ssml =
     `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="sl-SI">` +
-    `<voice name="${esc(voice)}"><prosody rate="${ratePct}">${esc(text)}</prosody></voice></speak>`;
-
+    `<voice name="${esc(voiceName())}"><prosody rate="${ratePct}">${esc(text)}</prosody></voice></speak>`;
   const r = await fetch(`https://${region}.tts.speech.microsoft.com/cognitiveservices/v1`, {
     method: "POST",
     headers: {
@@ -45,17 +51,26 @@ export async function POST(req: Request) {
     },
     body: ssml,
   });
-
   if (!r.ok) {
-    const detail = await r.text().catch(() => "");
-    console.error("Azure TTS napaka", r.status, detail);
+    console.error("Azure TTS napaka", r.status, await r.text().catch(() => ""));
     return Response.json({ error: "Govora ni bilo mogoče ustvariti" }, { status: 502 });
   }
+  return new Response(r.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" } });
+}
 
-  return new Response(r.body, {
-    headers: {
-      "Content-Type": "audio/mpeg",
-      "Cache-Control": "private, max-age=86400",
-    },
-  });
+export async function POST(req: Request) {
+  const p = provider();
+  if (!p) return Response.json({ error: "Govor ni nastavljen" }, { status: 503 });
+
+  let body: { text?: string; rate?: number };
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "Neveljavna zahteva" }, { status: 400 });
+  }
+  const text = String(body.text ?? "").replace(/[»«]/g, "").trim().slice(0, 1500);
+  if (!text) return Response.json({ error: "Prazno besedilo" }, { status: 400 });
+  const rate = Math.min(1.5, Math.max(0.6, Number(body.rate) || 1));
+
+  return p === "google" ? googleTts(text, rate) : azureTts(text, rate);
 }

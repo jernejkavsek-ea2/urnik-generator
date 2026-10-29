@@ -1,7 +1,9 @@
-// Brskalnik tu preveri, ali je Azure Speech nastavljen (brez razkrivanja ključa)
+// Brskalnik tu preveri, ali je govor na strežniku nastavljen (brez razkrivanja ključev)
+import { provider, voiceName } from "@/lib/speech-provider";
+
 export const dynamic = "force-dynamic";
 
 export function GET() {
-  const ok = Boolean(process.env.AZURE_SPEECH_KEY && process.env.AZURE_SPEECH_REGION);
-  return Response.json({ tts: ok, stt: ok, voice: process.env.AZURE_TTS_VOICE || "sl-SI-PetraNeural" });
+  const p = provider();
+  return Response.json({ tts: !!p, stt: !!p, provider: p, voice: p ? voiceName() : null });
 }
