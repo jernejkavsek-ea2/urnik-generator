@@ -102,10 +102,9 @@ function pcmToWav(pcm: Buffer, rate = 24000) {
   return Buffer.concat([h, pcm]);
 }
 
-async function geminiTts(text: string, rate: number): Promise<Response> {
+async function geminiTts(text: string, _rate: number): Promise<Response> {
   const key = process.env.GEMINI_API_KEY!;
   const voice = process.env.GEMINI_TTS_VOICE || "Kore";
-  const pace = rate > 1.05 ? " nekoliko hitreje" : rate < 0.95 ? " nekoliko počasneje" : "";
   const models = [process.env.GEMINI_TTS_MODEL || "gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts", "gemini-2.5-flash-preview-tts"];
   for (const model of models) {
     const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -113,7 +112,7 @@ async function geminiTts(text: string, rate: number): Promise<Response> {
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       signal: AbortSignal.timeout(25000),
       body: JSON.stringify({
-        contents: [{ parts: [{ text: `Preberi v knjižni slovenščini, mirno in naravno${pace}, kot prijazna šolska svetovalka: ${text}` }] }],
+        contents: [{ parts: [{ text }] }], // samo besedilo – vsako navodilo bi model prebral na glas
         generationConfig: {
           responseModalities: ["AUDIO"],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },

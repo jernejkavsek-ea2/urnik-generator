@@ -9,6 +9,8 @@ export function GET() {
   return Response.json({
     tts: !!tp,
     ttsProvider: tp,
+    // verzija glasu: ob menjavi ponudnika/glasu/modela brskalnik ne uporabi starih posnetkov iz predpomnilnika
+    ttsVersion: [tp, process.env.TTS_PROVIDER, process.env.GEMINI_TTS_VOICE, process.env.GEMINI_TTS_MODEL, process.env.ELEVENLABS_VOICE_ID, process.env.ELEVENLABS_MODEL, "3"].map((x) => x || "").join("."),
     stt: !!p,
     // Pri ElevenLabs (brezplačni paket) za mikrofon raje uporabimo prepoznavo brskalnika,
     // kjer obstaja (Chrome, Edge) – tako se krediti porabijo samo za govor.

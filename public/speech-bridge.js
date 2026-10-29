@@ -15,11 +15,11 @@
     synth: window.speechSynthesis || null,
     SR: window.SpeechRecognition || window.webkitSpeechRecognition || null,
   };
-  var cfg = { tts: false, stt: false, preferNativeStt: false };
+  var cfg = { tts: false, stt: false, preferNativeStt: false, v: '' };
   var isSafari = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent);
   var ready = fetch('/api/speech-status', { cache: 'no-store' })
     .then(function (r) { return r.ok ? r.json() : {}; })
-    .then(function (j) { cfg.tts = !!j.tts; cfg.stt = !!j.stt; cfg.preferNativeStt = !!j.preferNativeStt; })
+    .then(function (j) { cfg.tts = !!j.tts; cfg.stt = !!j.stt; cfg.preferNativeStt = !!j.preferNativeStt; cfg.v = String(j.ttsVersion || ''); })
     .catch(function () {});
 
   /* ---------- GOVOR (TTS) ---------- */
@@ -70,7 +70,7 @@
     return out.length ? out : [text];
   }
   function ttsUrl(text, rate, attempt) {
-    return '/api/tts?r=' + rate.toFixed(2) + '&t=' + encodeURIComponent(text) + (attempt ? '&a=' + attempt : '');
+    return '/api/tts?v=' + encodeURIComponent(cfg.v) + '&r=' + rate.toFixed(2) + '&t=' + encodeURIComponent(text) + (attempt ? '&a=' + attempt : '');
   }
   var pre = {}; // url -> Promise<blobURL>
   function prefetch(url) {
