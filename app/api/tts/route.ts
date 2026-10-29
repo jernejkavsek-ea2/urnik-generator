@@ -1,5 +1,5 @@
 // Naraven slovenski govor: ElevenLabs (Eleven v3), Google Chirp 3 HD ali Azure Neural
-import { provider, voiceName } from "@/lib/speech-provider";
+import { provider, ttsProvider, voiceName } from "@/lib/speech-provider";
 
 export const runtime = "nodejs";
 
@@ -13,20 +13,26 @@ async function elevenTts(text: string, rate: number): Promise<Response> {
   const base = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceName())}`;
   // /stream: zvok začne prihajati takoj, brskalnik ga predvaja sproti
   const url = `${base}/stream?output_format=mp3_44100_64`;
-  const call = (extra: boolean) =>
+  const speed = Math.min(1.2, Math.max(0.7, rate));
+  const call = (opts: Record<string, unknown>) =>
     fetch(url, {
       method: "POST",
       headers: { "xi-api-key": key, "Content-Type": "application/json", Accept: "audio/mpeg" },
-      body: JSON.stringify({
-        text,
-        model_id: model,
-        ...(extra
-          ? { language_code: "sl", voice_settings: { speed: Math.min(1.2, Math.max(0.7, rate)) } }
-          : {}),
-      }),
+      body: JSON.stringify({ text, model_id: model, ...opts }),
     });
-  let r = await call(true);
-  if (r.status === 400 || r.status === 422) r = await call(false); // model ne sprejme dodatnih nastavitev
+  // Slovenščina mora biti vedno vsiljena (sicer model prvi stavek včasih prebere angleško).
+  // Če model ne sprejme hitrosti, poskusimo brez nje – jezik pa ostane.
+  const attempts: Record<string, unknown>[] = [
+    { language_code: "sl", voice_settings: { speed } },
+    { language_code: "sl" },
+    { language_code: "slv" },
+    {},
+  ];
+  let r = await call(attempts[0]);
+  for (let i = 1; i < attempts.length && (r.status === 400 || r.status === 422); i++) {
+    console.warn("ElevenLabs zavrnil nastavitve", JSON.stringify(attempts[i - 1]), (await r.text().catch(() => "")).slice(0, 300));
+    r = await call(attempts[i]);
+  }
   if (!r.ok) {
     console.error("ElevenLabs TTS napaka", r.status, await r.text().catch(() => ""));
     return Response.json({ error: "Govora ni bilo mogoče ustvariti" }, { status: 502 });
@@ -87,12 +93,55 @@ async function azureTts(text: string, rate: number): Promise<Response> {
   return new Response(r.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" } });
 }
 
+// Gemini TTS: vrne surov PCM (24 kHz, 16-bit) – zavijemo ga v WAV
+function pcmToWav(pcm: Buffer, rate = 24000) {
+  const h = Buffer.alloc(44);
+  h.write("RIFF", 0); h.writeUInt32LE(36 + pcm.length, 4); h.write("WAVE", 8); h.write("fmt ", 12);
+  h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(rate, 24);
+  h.writeUInt32LE(rate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write("data", 36); h.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([h, pcm]);
+}
+
+async function geminiTts(text: string, rate: number): Promise<Response> {
+  const key = process.env.GEMINI_API_KEY!;
+  const voice = process.env.GEMINI_TTS_VOICE || "Kore";
+  const pace = rate > 1.05 ? " nekoliko hitreje" : rate < 0.95 ? " nekoliko počasneje" : "";
+  const models = [process.env.GEMINI_TTS_MODEL || "gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts", "gemini-2.5-flash-preview-tts"];
+  for (const model of models) {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      signal: AbortSignal.timeout(25000),
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: `Preberi v knjižni slovenščini, mirno in naravno${pace}, kot prijazna šolska svetovalka: ${text}` }] }],
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
+        },
+      }),
+    });
+    if (!r.ok) {
+      console.error("Gemini TTS napaka", model, r.status, (await r.text().catch(() => "")).slice(0, 300));
+      continue;
+    }
+    const j = (await r.json()) as { candidates?: { content?: { parts?: { inlineData?: { data?: string; mimeType?: string } }[] } }[] };
+    const part = j.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData;
+    if (!part?.data) continue;
+    const m = /rate=(\d+)/.exec(part.mimeType || "");
+    return new Response(pcmToWav(Buffer.from(part.data, "base64"), m ? +m[1] : 24000), {
+      headers: { "Content-Type": "audio/wav", "Cache-Control": "private, max-age=86400" },
+    });
+  }
+  return Response.json({ error: "Govora ni bilo mogoče ustvariti" }, { status: 502 });
+}
+
 function speak(rawText: unknown, rawRate: unknown): Promise<Response> | Response {
-  const p = provider();
+  const p = ttsProvider();
   if (!p) return Response.json({ error: "Govor ni nastavljen" }, { status: 503 });
   const text = String(rawText ?? "").replace(/[»«]/g, "").trim().slice(0, 1500);
   if (!text) return Response.json({ error: "Prazno besedilo" }, { status: 400 });
   const rate = Math.min(1.5, Math.max(0.6, Number(rawRate) || 1));
+  if (p === "gemini") return geminiTts(text, rate);
   if (p === "elevenlabs") return elevenTts(text, rate);
   return p === "google" ? googleTts(text, rate) : azureTts(text, rate);
 }

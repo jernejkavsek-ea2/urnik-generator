@@ -17,3 +17,14 @@ export function voiceName(): string {
   if (p === "google") return process.env.GOOGLE_TTS_VOICE || "sl-SI-Chirp3-HD-Kore";
   return process.env.AZURE_TTS_VOICE || "sl-SI-PetraNeural";
 }
+
+// Glas (TTS) lahko izberete posebej: TTS_PROVIDER=gemini | elevenlabs | google | azure
+export type TtsProvider = Provider | "gemini";
+export function ttsProvider(): TtsProvider {
+  const want = (process.env.TTS_PROVIDER || "").toLowerCase();
+  if (want === "gemini" && process.env.GEMINI_API_KEY) return "gemini";
+  if (want === "elevenlabs" && process.env.ELEVENLABS_API_KEY) return "elevenlabs";
+  if (want === "google" && process.env.GOOGLE_API_KEY) return "google";
+  if (want === "azure" && process.env.AZURE_SPEECH_KEY) return "azure";
+  return provider();
+}

@@ -77,7 +77,7 @@ export async function POST(req: Request) {
   const history = (Array.isArray(body.history) ? body.history : []).slice(-8).join("\n").slice(0, 3000);
   const user = `PODATKI URNIKA (JSON):\n${ctx}\n\nZADNJI POGOVOR:\n${history || "(ni)"}\n\nUPORABNIK: ${text}`;
 
-  const models = [process.env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-2.5-flash-lite"];
+  const models = [process.env.GEMINI_MODEL || "gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
   for (const model of models) {
     try {
       const r = await gemini(model, key, user);
