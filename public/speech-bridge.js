@@ -234,6 +234,16 @@
   BridgeRecognition.prototype.addEventListener = function () {};
   BridgeRecognition.prototype.removeEventListener = function () {};
 
+  /* ---------- PAMETNI POGOVOR (AI) ---------- */
+  // Aplikacija pokliče window.urnikAI, ko ukaza ne razume. Vrne {command, answer, chips} ali null.
+  window.urnikAI = function (text, ctx, history) {
+    return fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text, ctx: ctx, history: history }),
+    }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+  };
+
   window.SpeechRecognition = BridgeRecognition;
   window.webkitSpeechRecognition = BridgeRecognition;
 })();

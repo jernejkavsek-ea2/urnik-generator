@@ -12,6 +12,7 @@ export function GET() {
     // kjer obstaja (Chrome, Edge) – tako se krediti porabijo samo za govor.
     preferNativeStt: p === "elevenlabs",
     provider: p,
+    ai: Boolean(process.env.GEMINI_API_KEY),
     voice: p ? voiceName() : null,
   });
 }
