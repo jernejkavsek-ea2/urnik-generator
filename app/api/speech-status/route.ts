@@ -5,5 +5,13 @@ export const dynamic = "force-dynamic";
 
 export function GET() {
   const p = provider();
-  return Response.json({ tts: !!p, stt: !!p, provider: p, voice: p ? voiceName() : null });
+  return Response.json({
+    tts: !!p,
+    stt: !!p,
+    // Pri ElevenLabs (brezplačni paket) za mikrofon raje uporabimo prepoznavo brskalnika,
+    // kjer obstaja (Chrome, Edge) – tako se krediti porabijo samo za govor.
+    preferNativeStt: p === "elevenlabs",
+    provider: p,
+    voice: p ? voiceName() : null,
+  });
 }

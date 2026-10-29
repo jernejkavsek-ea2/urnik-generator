@@ -2,10 +2,10 @@
  * Speech bridge za Urnik generator
  * ---------------------------------
  * Aplikacija kliče window.speechSynthesis in window.SpeechRecognition.
- * Ta skripta ju (če je na strežniku nastavljen Azure Speech) preusmeri na
+ * Ta skripta ju (če je na strežniku nastavljen ElevenLabs, Google ali Azure) preusmeri na
  * /api/tts in /api/stt, ki tečeta na Vercelu:
- *   - govor: nevronski slovenski glas (privzeto sl-SI-PetraNeural)
- *   - prepoznava: snemanje v brskalniku -> WAV 16 kHz -> Azure sl-SI
+ *   - govor: naraven slovenski glas
+ *   - prepoznava: snemanje v brskalniku -> WAV 16 kHz -> strežnik (sl-SI)
  * Če strežnik ni nastavljen, ostane vse kot prej (vgrajeni glas brskalnika).
  */
 (function () {
@@ -15,10 +15,11 @@
     synth: window.speechSynthesis || null,
     SR: window.SpeechRecognition || window.webkitSpeechRecognition || null,
   };
-  var cfg = { tts: false, stt: false };
+  var cfg = { tts: false, stt: false, preferNativeStt: false };
+  var isSafari = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent);
   var ready = fetch('/api/speech-status', { cache: 'no-store' })
     .then(function (r) { return r.ok ? r.json() : {}; })
-    .then(function (j) { cfg.tts = !!j.tts; cfg.stt = !!j.stt; })
+    .then(function (j) { cfg.tts = !!j.tts; cfg.stt = !!j.stt; cfg.preferNativeStt = !!j.preferNativeStt; })
     .catch(function () {});
 
   /* ---------- GOVOR (TTS) ---------- */
@@ -161,7 +162,9 @@
     var self = this;
     ready.then(function () {
       if (self._aborted) return self._finish();
-      if (!cfg.stt) {
+      // Prepoznava brskalnika: če strežnik ni nastavljen ali če strežnik tako želi (Chrome/Edge; Safari ne zna slovensko)
+      var useNative = !cfg.stt || (cfg.preferNativeStt && native.SR && !isSafari);
+      if (useNative) {
         if (!native.SR) { self._emit('error', { error: 'service-not-allowed' }); return self._finish(); }
         var n = new native.SR();
         n.lang = self.lang; n.interimResults = self.interimResults; n.maxAlternatives = self.maxAlternatives; n.continuous = self.continuous;

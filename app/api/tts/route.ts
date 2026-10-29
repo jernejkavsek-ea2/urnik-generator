@@ -1,10 +1,37 @@
-// Naraven slovenski govor: Google Chirp 3 HD (če je GOOGLE_API_KEY) ali Azure Neural
+// Naraven slovenski govor: ElevenLabs (Eleven v3), Google Chirp 3 HD ali Azure Neural
 import { provider, voiceName } from "@/lib/speech-provider";
 
 export const runtime = "nodejs";
 
 function esc(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+async function elevenTts(text: string, rate: number): Promise<Response> {
+  const key = process.env.ELEVENLABS_API_KEY!;
+  const model = process.env.ELEVENLABS_MODEL || "eleven_v3";
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceName())}?output_format=mp3_44100_128`;
+  const call = (extra: boolean) =>
+    fetch(url, {
+      method: "POST",
+      headers: { "xi-api-key": key, "Content-Type": "application/json", Accept: "audio/mpeg" },
+      body: JSON.stringify({
+        text,
+        model_id: model,
+        ...(extra
+          ? { language_code: "sl", voice_settings: { speed: Math.min(1.2, Math.max(0.7, rate)) } }
+          : {}),
+      }),
+    });
+  let r = await call(true);
+  if (r.status === 400 || r.status === 422) r = await call(false); // model ne sprejme dodatnih nastavitev
+  if (!r.ok) {
+    console.error("ElevenLabs TTS napaka", r.status, await r.text().catch(() => ""));
+    return Response.json({ error: "Govora ni bilo mogoče ustvariti" }, { status: 502 });
+  }
+  return new Response(r.body, {
+    headers: { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" },
+  });
 }
 
 async function googleTts(text: string, rate: number): Promise<Response> {
@@ -72,5 +99,6 @@ export async function POST(req: Request) {
   if (!text) return Response.json({ error: "Prazno besedilo" }, { status: 400 });
   const rate = Math.min(1.5, Math.max(0.6, Number(body.rate) || 1));
 
+  if (p === "elevenlabs") return elevenTts(text, rate);
   return p === "google" ? googleTts(text, rate) : azureTts(text, rate);
 }
