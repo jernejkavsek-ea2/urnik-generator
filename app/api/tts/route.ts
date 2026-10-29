@@ -38,7 +38,7 @@ async function elevenTts(text: string, rate: number): Promise<Response> {
     return Response.json({ error: "Govora ni bilo mogoče ustvariti" }, { status: 502 });
   }
   return new Response(r.body, {
-    headers: { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" },
+    headers: { "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=86400, s-maxage=31536000, immutable" },
   });
 }
 
@@ -65,7 +65,7 @@ async function googleTts(text: string, rate: number): Promise<Response> {
   const j = (await r.json()) as { audioContent?: string };
   if (!j.audioContent) return Response.json({ error: "Prazen odgovor" }, { status: 502 });
   return new Response(Buffer.from(j.audioContent, "base64"), {
-    headers: { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" },
+    headers: { "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=86400, s-maxage=31536000, immutable" },
   });
 }
 
@@ -90,7 +90,7 @@ async function azureTts(text: string, rate: number): Promise<Response> {
     console.error("Azure TTS napaka", r.status, await r.text().catch(() => ""));
     return Response.json({ error: "Govora ni bilo mogoče ustvariti" }, { status: 502 });
   }
-  return new Response(r.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" } });
+  return new Response(r.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=86400, s-maxage=31536000, immutable" } });
 }
 
 // Gemini TTS: vrne surov PCM (24 kHz, 16-bit) – zavijemo ga v WAV
@@ -129,7 +129,7 @@ async function geminiTts(text: string, rate: number): Promise<Response> {
     if (!part?.data) continue;
     const m = /rate=(\d+)/.exec(part.mimeType || "");
     return new Response(pcmToWav(Buffer.from(part.data, "base64"), m ? +m[1] : 24000), {
-      headers: { "Content-Type": "audio/wav", "Cache-Control": "private, max-age=86400" },
+      headers: { "Content-Type": "audio/wav", "Cache-Control": "public, max-age=86400, s-maxage=31536000, immutable" },
     });
   }
   return Response.json({ error: "Govora ni bilo mogoče ustvariti" }, { status: 502 });

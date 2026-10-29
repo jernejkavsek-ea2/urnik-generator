@@ -58,37 +58,76 @@
     } catch (e) { return false; }
   }
 
-  // Pretakanje: <audio> dobi URL in začne igrati, ko pride prvi del zvoka.
-  // Brskalnik ponovljene stavke vzame iz predpomnilnika (takoj).
-  function speakRemote(u, id, attempt) {
-    attempt = attempt || 0;
+  // Daljše besedilo razdelimo na stavke: prvi se predvaja takoj, naslednji se pripravlja med predvajanjem.
+  function chunks(text) {
+    // ločimo samo za ločilom + presledkom + veliko začetnico (datumi »1. 2. 2027« in »7.b« ostanejo celi)
+    var parts = text.split(/(?<=[.!?…]["»«)]?)\s+(?=[A-ZČŠŽĆĐ»"(])/), out = [], cur = '';
+    parts.forEach(function (p) {
+      cur += (cur ? ' ' : '') + p;
+      if (cur.trim().length >= 40) { out.push(cur.trim()); cur = ''; }
+    });
+    if (cur.trim()) { if (out.length && cur.trim().length < 20) out[out.length - 1] += ' ' + cur.trim(); else out.push(cur.trim()); }
+    return out.length ? out : [text];
+  }
+  function ttsUrl(text, rate, attempt) {
+    return '/api/tts?r=' + rate.toFixed(2) + '&t=' + encodeURIComponent(text) + (attempt ? '&a=' + attempt : '');
+  }
+  var pre = {}; // url -> Promise<blobURL>
+  function prefetch(url) {
+    if (!pre[url]) pre[url] = fetch(url).then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+      .then(function (b) { return URL.createObjectURL(b); }).catch(function () { delete pre[url]; return null; });
+    return pre[url];
+  }
+
+  function speakRemote(u, id) {
     var text = String((u && u.text) || '').trim();
     if (!text) return;
     var rate = u && typeof u.rate === 'number' ? u.rate : 1;
-    var url = '/api/tts?r=' + rate.toFixed(2) + '&t=' + encodeURIComponent(text) + (attempt ? '&a=' + attempt : '');
-    var done = false;
-    function fail() {
-      if (done || id !== seq) return;
-      done = true; speaking = false;
-      if (attempt < 1) { setTimeout(function () { if (id === seq) speakRemote(u, id, attempt + 1); }, 600); return; }
-      if (!nativeSl(u)) fire(u, 'end');
-    }
+    var list = chunks(text), started = false;
     speaking = true;
-    audio.onplaying = function () { if (id === seq) fire(u, 'start'); };
-    audio.onended = function () { if (id === seq) { done = true; speaking = false; fire(u, 'end'); } };
-    audio.onerror = function () { if (id === seq) fail(); };
-    audio.src = url;
-    var p = audio.play();
-    if (p && p.catch) p.catch(function (err) {
-      if (err && err.name === 'AbortError') return;
-      if (err && err.name === 'NotAllowedError') {
-        // brskalnik še ne dovoli zvoka (ni bilo klika) – predvajamo ob prvem kliku
-        var go = function () { window.removeEventListener('pointerdown', go, true); if (id === seq) audio.play().catch(function () {}); };
-        window.addEventListener('pointerdown', go, true);
-        return;
-      }
-      fail();
-    });
+
+    function finish() { if (id === seq) { speaking = false; fire(u, 'end'); } }
+    function giveUp() {
+      if (id !== seq) return;
+      speaking = false;
+      // glas brskalnika samo, če je slovenski in še nismo začeli govoriti
+      if (started || !nativeSl(u)) fire(u, 'end');
+    }
+    function playAt(k, attempt) {
+      if (id !== seq) return;
+      if (k >= list.length) return finish();
+      var url = ttsUrl(list[k], rate, attempt);
+      var srcP = k === 0 && !attempt ? Promise.resolve(url) : (pre[url] || prefetch(url));
+      srcP.then(function (src) {
+        if (id !== seq) return;
+        if (!src) return attempt < 1 ? setTimeout(function () { playAt(k, attempt + 1); }, 600) : giveUp();
+        var failed = false;
+        function fail() {
+          if (failed || id !== seq) return; failed = true;
+          if (attempt < 1) setTimeout(function () { playAt(k, attempt + 1); }, 600); else giveUp();
+        }
+        audio.onplaying = function () {
+          if (id !== seq) return;
+          if (k + 1 < list.length) prefetch(ttsUrl(list[k + 1], rate, 0)); // naslednji stavek se pripravlja med predvajanjem
+          if (!started) { started = true; fire(u, 'start'); }
+        };
+        audio.onended = function () { if (id === seq) playAt(k + 1, 0); };
+        audio.onerror = function () { if (id === seq) fail(); };
+        audio.src = src;
+        var p = audio.play();
+        if (p && p.catch) p.catch(function (err) {
+          if (err && err.name === 'AbortError') return;
+          if (err && err.name === 'NotAllowedError') {
+            // brskalnik še ne dovoli zvoka (ni bilo klika) – predvajamo ob prvem kliku
+            var go = function () { window.removeEventListener('pointerdown', go, true); if (id === seq) audio.play().catch(function () {}); };
+            window.addEventListener('pointerdown', go, true);
+            return;
+          }
+          fail();
+        });
+      });
+    }
+    playAt(0, 0);
   }
 
   var synthShim = {
@@ -100,7 +139,7 @@
       var id = ++seq;
       ready.then(function () {
         if (id !== seq) return;
-        if (cfg.tts) speakRemote(u, id, 0);
+        if (cfg.tts) speakRemote(u, id);
         else if (!nativeSl(u) && native.synth) native.synth.speak(u);
       });
     },
